@@ -1,6 +1,11 @@
-import time
+import csv
 import json
+import os
 import random
+import time
+import uuid
+from pathlib import Path
+
 from kafka import KafkaProducer
 
 # 1. Connect to Kafka
@@ -17,56 +22,29 @@ while producer is None:
         print("Waiting for Kafka...", e)
         time.sleep(5)
 
-# 2. Define User Profiles (The "Blueprint")
-# We simulate 1000 users with different spending habits
-# LOCATION LOGIC: We assign a "Home" to each user randomly from this list.
-locations_list = ["NY", "CA", "TX", "FL", "IL", "Delhi", "London", "Tokyo"]
-users = []
-for i in range(1000):
-    users.append({
-        "user_id": f"User_{i}",
-        "home_loc": random.choice(locations_list), # Assign Home: e.g. "Delhi"
-        "avg_spend": random.uniform(10, 100)
-    })
+# Keep the online contract identical to train_model_kaggle.py.
+feature_columns = [f"V{i}" for i in range(1, 29)] + ["Amount"]
+dataset_path = Path(os.getenv("KAGGLE_DATASET_PATH", "creditcard.csv"))
+if not dataset_path.exists():
+    raise SystemExit(f"Dataset not found: {dataset_path}. Upload creditcard.csv before starting the producer.")
 
-# 3. The Infinite Loop (Data Generation)
-print("Starting transaction stream...")
+with dataset_path.open(newline="") as dataset_file:
+    rows = list(csv.DictReader(dataset_file))
+if not rows:
+    raise SystemExit("creditcard.csv does not contain any transactions.")
+
+rate_per_second = float(os.getenv("TRANSACTIONS_PER_SECOND", "100"))
+delay = 1.0 / rate_per_second
+print(f"Loaded {len(rows):,} Kaggle rows; streaming at {rate_per_second:g} transactions/second")
+
 while True:
-    # Pick a random user
-    user = random.choice(users)
-    
-    # Decide: Is this Fraud? (1% chance)
-    is_fraud = random.random() < 0.01
-    
-    if is_fraud:
-        # FRAUD PATTERN:
-        # 1. Amount is huge (10x normal)
-        # 2. Location is NOT their home (e.g. User from Delhi is suddenly in Russia)
-        amount = random.uniform(1000, 5000)
-        location = random.choice(["China", "Russia", "Brazil", "Unknown"])
-    else:
-        # NORMAL PATTERN:
-        # 1. Amount is near their average
-        # 2. Location is their HOME
-        amount = random.gauss(user["avg_spend"], 10) 
-        location = user["home_loc"]
-    
-    # Create the transaction object
+    row = random.choice(rows)
     transaction = {
-        "user_id": user["user_id"],
-        "amount": round(abs(amount), 2),
-        "location": location,
-        "home_loc": user["home_loc"],  # User's permanent home location
-        "timestamp": time.time(),
-        "is_fraud": int(is_fraud)
+        "transaction_id": str(uuid.uuid4()),
+        "user_id": "kaggle-replay",
+        "event_timestamp": time.time(),
+        "source": "kaggle_replay",
     }
-    
-    # Send to Kafka Topic 'transactions'
+    transaction.update({column: float(row[column]) for column in feature_columns})
     producer.send('transactions', transaction)
-    
-    # Print occasionally so we see it working
-    if is_fraud:
-        print(f"⚠️  FRAUD SENT: {transaction}")
-    
-    # Sleep to control speed (100 transactions per second)
-    time.sleep(0.01)
+    time.sleep(delay)

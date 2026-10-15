@@ -27,8 +27,8 @@ Real-time monitoring dashboard built with Streamlit showing:
 
 ```
 Producer → Kafka → Spark Streaming → ML Model → Predictions → Dashboard
-                      ↓
-                    MinIO (S3)
+                       ↓
+                     HDFS data lake
                       ↓
                    MLflow (Model Registry)
 ```
@@ -39,13 +39,13 @@ Producer → Kafka → Spark Streaming → ML Model → Predictions → Dashboar
 - **Stream Processing**: Apache Spark Structured Streaming
 - **ML Framework**: PySpark MLlib (Random Forest Classifier)
 - **Model Management**: MLflow for experiment tracking and versioning
-- **Storage**: MinIO (S3-compatible object storage)
-- **Orchestration**: Apache Airflow (optional)
+- **Storage**: HDFS for transaction and training data; MLflow artifacts use a shared Docker volume
+- **Scoring API**: FastAPI endpoint at `POST /score`
 - **Visualization**: Streamlit dashboard
 
 ## 🚀 Features
 
--  **Real-time fraud detection** with <1 second latency
+-  **Real-time fraud detection** with a 0.7 manual-review threshold and a one-second processing trigger
 -  **Multi-source schema mapping** (supports multiple bank formats)
 -  **Dual model training** (synthetic + Kaggle dataset)
 -  **Model versioning** with MLflow
@@ -73,7 +73,7 @@ Producer → Kafka → Spark Streaming → ML Model → Predictions → Dashboar
 
 **Infrastructure:**
 - Docker & Docker Compose
-- MinIO (S3 storage)
+- Docker named volume for MLflow artifacts
 
 
 **ML Libraries:**
@@ -96,31 +96,22 @@ git clone https://github.com/YOUR_USERNAME/CreditGuard_AI.git
 cd CreditGuard_AI
 ```
 
-2. **Start all services**
+2. **Start infrastructure services, including the HDFS NameNode and DataNode**
 ```bash
 docker-compose up -d
 ```
 
-3. **Install Python dependencies**
+3. **Install local producer dependencies**
 ```bash
 pip install -r requirements.txt
 ```
 
-4. **Initialize MinIO buckets**
-```bash
-python init_minio.py
-```
+4. **Upload the Kaggle file to HDFS before training**
 
-5. **Start the transaction producer**
 ```bash
-python producer.py
-```
-
-6. **Run Spark inference (in new terminal)**
-```bash
-docker exec -it spark-master /opt/spark/bin/spark-submit \
-  --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.1,org.apache.hadoop:hadoop-aws:3.3.4 \
-  /opt/spark/spark_inference.py
+docker cp creditcard.csv namenode:/tmp/creditcard.csv
+docker exec namenode hdfs dfs -mkdir -p /data
+docker exec namenode hdfs dfs -put -f /tmp/creditcard.csv /data/creditcard.csv
 ```
 
 
@@ -134,7 +125,7 @@ spark-submit --packages org.apache.hadoop:hadoop-aws:3.3.4 train_model.py
 
 ### Kaggle Model
 ```bash
-# Upload dataset
+# Upload dataset to HDFS as shown above
 python upload_kaggle.py
 
 # Train
@@ -144,14 +135,27 @@ docker exec -it spark-master /opt/spark/bin/spark-submit \
   /opt/spark/train_model_kaggle.py
 ```
 
+The `spark-inference` and `scoring-api` services start from Docker Compose. Restart inference after training:
+
+```bash
+docker compose restart spark-inference
+python producer.py
+```
+
+The API accepts the same `V1`-`V28` and `Amount` features as the model:
+
+```bash
+curl -X POST http://localhost:8000/score -H "Content-Type: application/json" -d @transaction.json
+```
+
 ## 📁 Project Structure
 
 ```
 CreditGuard_AI/
-├── producer.py                 # Kafka data generator
+├── producer.py                 # Kaggle-compatible Kafka transaction replay
 ├── spark_inference.py          # Real-time inference
-├── train_model.py              # Synthetic model training
 ├── train_model_kaggle.py       # Kaggle model training
+├── api.py                      # Synchronous realtime scoring API
 ├── dashboard.py                # Streamlit UI
 ├── schema_config.py            # Multi-source schema mapping
 ├── docker-compose.yml          # Infrastructure setup
@@ -178,10 +182,10 @@ See `SCHEMA_MAPPING_GUIDE.md` for detailed instructions.
 
 ## 📊 How It Works
 
-1. **Data Generation**: `producer.py` simulates transactions and sends to Kafka
-2. **Stream Processing**: Spark reads from Kafka, applies schema mapping
-3. **Feature Engineering**: Extracts features (amount, time, location patterns)
-4. **Prediction**: ML model predicts fraud (0/1)
+1. **Data Generation**: `producer.py` replays Kaggle feature rows and sends them to Kafka
+2. **Stream Processing**: Spark reads the Kafka stream using the trained model's exact feature contract
+3. **Prediction**: The model emits a fraud probability; transactions at or above 0.7 are flagged for manual review
+4. **API response**: `POST /score` waits for the matching Kafka prediction and returns within a two-second deadline
 5. **Output**: Results sent to Kafka topics and displayed on dashboard
 
 ## 🎓 Learning Outcomes
@@ -199,7 +203,7 @@ This project demonstrates:
 
 MIT License - feel free to use for learning and portfolio purposes.
 
-**Note:** The original `creditcard.csv` dataset (≈ XX MB) is not included in this repository due to GitHub's file‑size limit. You can download it from the Kaggle dataset or from the MinIO bucket used by the project.
+**Note:** The original `creditcard.csv` dataset is not included in this repository due to GitHub's file-size limit. Download it from the Kaggle Credit Card Fraud Detection dataset and upload it to HDFS with `upload_kaggle.py`.
 ---
 
 ** If this project helped you, please give it a star!**

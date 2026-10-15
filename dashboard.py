@@ -75,7 +75,8 @@ if consumer:
                 record = msg.value
                 st.session_state.total_count += 1
                 
-                is_fraud = record.get('prediction', 0) == 1
+                fraud_score = float(record.get('fraud_score', 0.0))
+                is_fraud = bool(record.get('review_required', fraud_score >= 0.7))
                 if is_fraud:
                     st.session_state.fraud_count += 1
                     location = record.get('location', 'Unknown')
@@ -83,9 +84,11 @@ if consumer:
                 
                 st.session_state.data.append({
                     'timestamp': pd.Timestamp.now(),
-                    'amount': record.get('amount', 0),
-                    'location': record.get('location', 'Unknown'),
+                    'amount': record.get('Amount', record.get('amount', 0)),
+                    'location': record.get('location', record.get('source', 'Unknown')),
                     'is_fraud': is_fraud,
+                    'fraud_score': fraud_score,
+                    'latency_ms': record.get('latency_ms'),
                     'user_id': record.get('user_id', 'Unknown')
                 })
         
@@ -154,7 +157,7 @@ with chart_col3:
 with table_col:
     st.subheader("📋 Recent Transactions")
     if st.session_state.data:
-        display_df = df[['timestamp', 'user_id', 'amount', 'location', 'is_fraud']].tail(10)
+        display_df = df[['timestamp', 'user_id', 'amount', 'location', 'fraud_score', 'latency_ms', 'is_fraud']].tail(10)
         display_df['is_fraud'] = display_df['is_fraud'].map({True: '🚨 FRAUD', False: '✅ Normal'})
         display_df['timestamp'] = display_df['timestamp'].dt.strftime('%H:%M:%S')
         st.dataframe(display_df, use_container_width=True, hide_index=True)

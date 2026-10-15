@@ -1,40 +1,27 @@
 """
-Upload Kaggle Credit Card Fraud Dataset to MinIO
-=================================================
-This script uploads the creditcard.csv file to MinIO S3 storage.
+Upload Kaggle Credit Card Fraud Dataset to HDFS
+================================================
+This script copies creditcard.csv into the Docker HDFS data lake.
 """
 
-import boto3
-from botocore.exceptions import ClientError
+import subprocess
+from pathlib import Path
 
-# MinIO connection settings
-s3 = boto3.client('s3',
-    endpoint_url='http://localhost:9000',
-    aws_access_key_id='minioadmin',
-    aws_secret_access_key='minioadmin'
-)
+dataset = Path("creditcard.csv")
+if not dataset.exists():
+    raise SystemExit("Error: creditcard.csv was not found in the current directory.")
 
-print("📤 Uploading Kaggle dataset to MinIO...")
+print("Uploading Kaggle dataset to HDFS...")
 
 try:
-    # Upload the CSV file to MinIO
-    s3.upload_file(
-        'creditcard.csv',
-        'transactions',
-        'creditcard.csv'
-    )
-    print("✅ Successfully uploaded creditcard.csv to MinIO!")
-    print("📍 Location: s3a://transactions/creditcard.csv")
-    
-    # Verify the file
-    response = s3.head_object(Bucket='transactions', Key='creditcard.csv')
-    file_size = response['ContentLength']
-    print(f"📊 File size: {file_size / (1024*1024):.2f} MB")
-    
+    subprocess.run(["docker", "cp", str(dataset), "namenode:/tmp/creditcard.csv"], check=True)
+    subprocess.run(["docker", "exec", "namenode", "hdfs", "dfs", "-mkdir", "-p", "/data"], check=True)
+    subprocess.run([
+        "docker", "exec", "namenode", "hdfs", "dfs", "-put", "-f",
+        "/tmp/creditcard.csv", "/data/creditcard.csv"
+    ], check=True)
+    print("Successfully uploaded creditcard.csv to hdfs://namenode:9000/data/creditcard.csv")
 except FileNotFoundError:
-    print("❌ Error: creditcard.csv not found in current directory!")
-    print("Please ensure creditcard.csv is in the same folder as this script.")
-except ClientError as e:
-    print(f"❌ Error uploading to MinIO: {e}")
-except Exception as e:
-    print(f"❌ Unexpected error: {e}")
+    print("Error: Docker is required and must be available on PATH.")
+except subprocess.CalledProcessError as error:
+    print(f"Error uploading dataset to HDFS: {error}")

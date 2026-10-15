@@ -6,11 +6,6 @@ import mlflow
 import mlflow.spark
 import os
 
-# Set AWS credentials for MLflow artifact storage
-os.environ['AWS_ACCESS_KEY_ID'] = 'minioadmin'
-os.environ['AWS_SECRET_ACCESS_KEY'] = 'minioadmin'
-os.environ['MLFLOW_S3_ENDPOINT_URL'] = 'http://minio:9000'
-
 print("=" * 60)
 print("🎯 Kaggle Credit Card Fraud Detection - Model Training")
 print("=" * 60)
@@ -20,20 +15,14 @@ print("\n📦 Initializing Spark...")
 spark = SparkSession.builder \
     .appName("FraudDetectorKaggle") \
     .config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:3.3.4") \
-    .config("spark.hadoop.fs.s3a.endpoint", "http://minio:9000") \
-    .config("spark.hadoop.fs.s3a.access.key", "minioadmin") \
-    .config("spark.hadoop.fs.s3a.secret.key", "minioadmin") \
-    .config("spark.hadoop.fs.s3a.path.style.access", "true") \
-    .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
-    .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false") \
     .getOrCreate()
 
 print("✅ Spark initialized!")
 
-# 2. Load Kaggle dataset from MinIO
-print("\n📊 Loading Kaggle credit card fraud dataset from MinIO...")
+# 2. Load Kaggle dataset from HDFS
+print("\n📊 Loading Kaggle credit card fraud dataset from HDFS...")
 df = spark.read.csv(
-    "s3a://transactions/creditcard.csv",
+    "hdfs://namenode:9000/data/creditcard.csv",
     header=True,
     inferSchema=True
 )
